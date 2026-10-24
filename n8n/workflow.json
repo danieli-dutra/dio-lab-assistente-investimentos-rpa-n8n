@@ -1,0 +1,299 @@
+{
+  "name": "DIO | Assistente de Investimentos - RPA + IA",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dio-investimentos",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "6db849c6-0238-46b7-826f-56fe7384241c",
+      "name": "Webhook"
+    },
+    {
+      "parameters": {
+        "url": "https://digitalinnovationone.github.io/dio-lab-assistente-investimentos-rpa-n8n/data.csv",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "csv_data"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        224,
+        0
+      ],
+      "id": "bd3c98d9-51ba-44a9-be6e-df6269bbb6b2",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst csv = $input.first().json.csv_data;\n\nif (typeof csv !== 'string' || !csv.trim()) {\n  throw new Error('CSV vazio ou inválido.');\n}\n\nconst linhas = csv.trim().split(/\\r?\\n/);\nconst cabecalho = linhas.shift().split(',');\n\nconst investimentos = linhas\n  .filter(linha => linha.trim())\n  .map(linha => {\n    const valores = linha.split(',');\n\n    const registro = Object.fromEntries(\n      cabecalho.map((coluna, indice) => [\n        coluna.trim(),\n        valores[indice]?.trim()\n      ])\n    );\n\n    return {\n      perfil: registro.perfil,\n      produto: registro.produto,\n      minimo: Number(registro.minimo),\n      rentabilidade: registro.rentabilidade\n    };\n  });\n\nreturn investimentos.map(investimento => ({\n  json: investimento\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "id": "82d8a4a7-ac27-4835-aeb0-20457d05cec8",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst clientes = $('Webhook').first().json.body.clientes;\nconst investimentos = $input.all().map(item => item.json);\n\nfunction converterSaldo(valor) {\n  if (typeof valor === 'number') return valor;\n\n  const texto = String(valor)\n    .replace(/R\\$\\s?/g, '')\n    .replace(/\\./g, '')\n    .replace(',', '.')\n    .trim();\n\n  const saldo = Number(texto);\n\n  if (!Number.isFinite(saldo) || saldo < 0) {\n    throw new Error(`Saldo inválido: ${valor}`);\n  }\n\n  return saldo;\n}\n\nif (!Array.isArray(clientes)) {\n  throw new Error('Lista de clientes não encontrada.');\n}\n\nconst resultado = clientes.map(cliente => {\n  const saldo = converterSaldo(cliente.saldo);\n\n  const produtosCompativeis = investimentos.filter(\n    investimento =>\n      investimento.perfil === cliente.perfil &&\n      Number.isFinite(investimento.minimo) &&\n      saldo >= investimento.minimo\n  );\n\n  return {\n    json: {\n      nome: cliente.nome,\n      email: cliente.email,\n      perfil: cliente.perfil,\n      saldo,\n      produtos_compativeis: produtosCompativeis,\n      total_produtos: produtosCompativeis.length\n    }\n  };\n});\n\nreturn resultado;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "id": "6d8a9eda-1877-4e7e-97d1-66ff8b9f59dd",
+      "name": "Cruzar Clientes e Investimentos"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst clientes = $input.all();\n\nreturn clientes.map(item => {\n  const cliente = item.json;\n\n  const produtos = cliente.produtos_compativeis || [];\n\n  const listaProdutos = produtos.length\n    ? produtos.map(p =>\n        `• ${p.produto} (mínimo: R$ ${p.minimo.toLocaleString('pt-BR')})`\n      ).join('\\n')\n    : 'Nenhum produto disponível para os critérios informados.';\n\n  const mensagem = `Olá, ${cliente.nome}!\n\nPreparamos uma simulação educativa com base no seu perfil ${cliente.perfil}.\n\nOpções compatíveis com os critérios informados:\n\n${listaProdutos}\n\nEstas informações são apenas ilustrativas e não constituem recomendação de investimento. A adequação real depende de outros fatores, incluindo objetivos, riscos e horizonte de investimento.\n\nAtenciosamente,\nAssistente de Investimentos | DIO`;\n\n  return {\n    json: {\n      nome: cliente.nome,\n      email: cliente.email,\n      perfil: cliente.perfil,\n      total_produtos: produtos.length,\n      mensagem\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        0
+      ],
+      "id": "4fcdc064-2286-4c5c-8753-3acd8d8cdce4",
+      "name": "Gerar Mensagens MVP"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-flash",
+          "mode": "list",
+          "cachedResultName": "Gemini 2.5 Flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Você é um assistente educacional de investimentos.\n\nSua tarefa é reescrever a mensagem fornecida em português brasileiro, com linguagem natural, cordial, objetiva e acessível.\n\nREGRAS OBRIGATÓRIAS:\n1. Utilize exclusivamente os produtos e valores presentes na mensagem original.\n2. Não invente produtos, taxas, rentabilidades ou benefícios.\n3. Não recomende investir nem afirme que um produto é o melhor.\n4. Não prometa resultados financeiros.\n5. Preserve o nome do cliente e seu perfil.\n6. Mantenha o aviso de que as informações são ilustrativas e não constituem recomendação de investimento.\n7. Entregue somente o texto final da mensagem, sem explicações adicionais.\n\nMENSAGEM ORIGINAL:\n{{ $json.mensagem }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1616,
+        -16
+      ],
+      "id": "e21f9d8a-3244-417e-9732-c2af67096fc3",
+      "name": "Message a model"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst respostaIA = $input.first().json;\n\n// Recupera o cliente associado à entrada do Gemini\nconst cliente = $('Loop Over Items').first(1, $runIndex).json;\n\nconst mensagemIA = respostaIA.content?.parts\n  ?.map(parte => parte.text || '')\n  .join('\\n')\n  .trim();\n\nif (!mensagemIA) {\n  throw new Error('O Gemini não retornou uma mensagem válida.');\n}\n\nreturn [{\n  json: {\n    nome: cliente.nome,\n    email: cliente.email,\n    perfil: cliente.perfil,\n    total_produtos: cliente.total_produtos,\n    mensagem_original: cliente.mensagem,\n    mensagem_ia: mensagemIA,\n    modelo: 'gemini-2.5-flash',\n    status: 'gerado'\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1984,
+        0
+      ],
+      "id": "5ad73a81-f9cc-4915-97c4-2822146c25da",
+      "name": "Consolidar Mensagem IA"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1344,
+        0
+      ],
+      "id": "dfcf1072-5d29-48ad-b493-7d4b55fd5cbc",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "amount": 60
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2160,
+        0
+      ],
+      "id": "4bcd6845-dbaa-47d9-b989-690690392ee4",
+      "name": "Wait"
+    },
+    {
+      "parameters": {
+        "maxItems": 2
+      },
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        0
+      ],
+      "id": "d745ed3c-0bac-419a-8877-d0192ac09deb",
+      "name": "Limit"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst itens = $input.all();\n\nconst clientes = itens.map(item => ({\n  nome: item.json.nome,\n  email: item.json.email,\n  perfil: item.json.perfil,\n  total_produtos: item.json.total_produtos,\n  mensagem_original: item.json.mensagem_original,\n  mensagem_ia: item.json.mensagem_ia,\n  modelo: item.json.modelo,\n  status: item.json.status\n}));\n\nreturn [{\n  json: {\n    projeto: \"DIO | Assistente de Investimentos - RPA + IA\",\n    total_clientes: clientes.length,\n    data_processamento: new Date().toISOString(),\n    clientes\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        -192
+      ],
+      "id": "6d5ae9bf-d5b1-46dd-a74b-3a0c4fbcec4c",
+      "name": "Resultado Final - Mensagens IA"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Cruzar Clientes e Investimentos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cruzar Clientes e Investimentos": {
+      "main": [
+        [
+          {
+            "node": "Gerar Mensagens MVP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gerar Mensagens MVP": {
+      "main": [
+        [
+          {
+            "node": "Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Consolidar Mensagem IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Resultado Final - Mensagens IA",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consolidar Mensagem IA": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "nodeGroups": [],
+  "tags": []
+}
